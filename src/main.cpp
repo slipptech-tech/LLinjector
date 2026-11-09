@@ -19,7 +19,8 @@
 #include <string>
 #include <vector>
 
-#include "inject.h"
+#include "config.h"
+#include "injector.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "comdlg32.lib")
@@ -47,7 +48,29 @@ struct Options {
     DWORD pid = 0;
     std::wstring name;
     std::wstring dll;
+
+    bool no_peb = false;
+    bool no_hash = false;
+    bool no_rb = false;
+    bool no_etw = false;
+    bool no_stage = false;
+    bool keep_staged = false;
+    bool no_syscalls = false;
+    bool no_terminate = false;
 };
+
+Config config_from(const Options& options) {
+    Config config;
+    config.unlink_peb = !options.no_peb;
+    config.unlink_hash = !options.no_hash;
+    config.unlink_rb = !options.no_rb;
+    config.suppress_etw = !options.no_etw;
+    config.stage = !options.no_stage;
+    config.delete_staged = !options.keep_staged;
+    config.direct_syscalls = !options.no_syscalls;
+    config.terminate_on_timeout = !options.no_terminate;
+    return config;
+}
 
 HINSTANCE g_instance = nullptr;
 
@@ -409,8 +432,9 @@ void do_inject() {
     log_line(L"DLL: " + dll);
 
     EnableWindow(g_inject, FALSE);
-    const InjectResult result = inject_loadlibrary(
-        pid, dll, [](const std::wstring& step) { log_line(step); }, name);
+    const Config config;
+    const InjectReport result = inject_library(
+        pid, dll, config, [](const std::wstring& step) { log_line(step); }, name);
     EnableWindow(g_inject, TRUE);
 
     if (result.ok) {
@@ -665,6 +689,14 @@ int run_cli(const Options& options) {
             L"  LLInjector.exe --list                 список процессов\n"
             L"  LLInjector.exe --pid <n> --dll <файл> загрузить DLL в процесс\n"
             L"  LLInjector.exe --name <имя> --dll <файл>\n\n"
+            L"  --no-peb        не вырезать три списка PEB\n"
+            L"  --no-hash       не резать LdrpHashTable\n"
+            L"  --no-rbtree     не удалять узел RB-дерева\n"
+            L"  --no-etw        не перенаправлять EtwEventWrite*\n"
+            L"  --no-stage      грузить исходный файл, не делать временную копию\n"
+            L"  --keep-staged   временную копию не удалять\n"
+            L"  --no-syscalls   не строить прямые syscall-трамплины\n"
+            L"  --no-terminate  не убивать поток по таймауту DllMain\n"
             L"  --quiet        не ждать Enter в конце\n"
             L"  --no-elevate   не запрашивать права администратора (окно)\n\n"
             L"Процесс и DLL должны быть одной разрядности с инжектором.\n");
@@ -708,8 +740,9 @@ int run_cli(const Options& options) {
     con_write(L"процесс: " + process_name + L" (pid " + std::to_wstring(pid) + L")\n");
     con_write(L"DLL: " + options.dll + L"\n");
 
-    const InjectResult result = inject_loadlibrary(
-        pid, options.dll, [](const std::wstring& step) { con_write(L"  " + step + L"\n"); },
+    const InjectReport result = inject_library(
+        pid, options.dll, config_from(options),
+        [](const std::wstring& step) { con_write(L"  " + step + L"\n"); },
         process_name);
 
     if (result.ok) {
@@ -759,6 +792,30 @@ bool parse_options(Options& options, int& exit_code) {
             options.quiet = true;
         } else if (argument == L"--no-elevate") {
             options.no_elevate = true;
+        } else if (argument == L"--no-peb") {
+            options.no_peb = true;
+            cli = true;
+        } else if (argument == L"--no-hash") {
+            options.no_hash = true;
+            cli = true;
+        } else if (argument == L"--no-rbtree") {
+            options.no_rb = true;
+            cli = true;
+        } else if (argument == L"--no-etw") {
+            options.no_etw = true;
+            cli = true;
+        } else if (argument == L"--no-stage") {
+            options.no_stage = true;
+            cli = true;
+        } else if (argument == L"--keep-staged") {
+            options.keep_staged = true;
+            cli = true;
+        } else if (argument == L"--no-syscalls") {
+            options.no_syscalls = true;
+            cli = true;
+        } else if (argument == L"--no-terminate") {
+            options.no_terminate = true;
+            cli = true;
         } else if (argument == L"--elevated") {
             // Set by the relaunched instance; nothing to do.
         } else if (argument == L"--help" || argument == L"-h" || argument == L"/?") {
