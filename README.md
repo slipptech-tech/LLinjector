@@ -1,4 +1,4 @@
-# LLInjector
+# LLInjector - Fast And Simple Load-library DLL inejector.
 
 DLL loader via `LoadLibraryExW` with full user-mode stealth:
 removes from PEB lists, `LdrpHashTable`, and two loader RB-trees,
