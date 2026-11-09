@@ -43,6 +43,14 @@ if not exist "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" (
 
 echo toolchain: "%VSDIR%"
 
+echo.
+echo [0/3] generating syscall data from the live ntdll
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\gen_syscalls.ps1
+if errorlevel 1 (
+  echo [x] syscall generator failed
+  exit /b 1
+)
+
 if not exist build mkdir build
 if not exist build\obj mkdir build\obj
 if not exist build\obj\x64 mkdir build\obj\x64
@@ -51,46 +59,57 @@ if not exist build\obj\x86 mkdir build\obj\x86
 set "CFLAGS=/nologo /std:c++20 /O2 /W4 /EHsc /permissive- /utf-8 /DUNICODE /D_UNICODE /MD"
 set "LDFLAGS=/nologo /SUBSYSTEM:WINDOWS /MANIFEST:NO /DEBUG:NONE /OPT:REF /OPT:ICF"
 set "LIBS=comctl32.lib comdlg32.lib shell32.lib user32.lib gdi32.lib advapi32.lib"
+set "SOURCES=src\syscalls.cpp src\injector.cpp src\unlink.cpp src\etw.cpp src\cleanup.cpp src\main.cpp"
 
 echo.
-echo [1/4] LLInjector.exe  (x64)
+echo [1/3] x64: LLInjector, verification payload, normal payload
 call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
-cl %CFLAGS% /Fo:build\obj\x64\ /c src\inject.cpp src\main.cpp
+cl %CFLAGS% /Fo:build\obj\x64\ /c %SOURCES%
 if errorlevel 1 exit /b 1
 link %LDFLAGS% /MACHINE:X64 /OUT:build\LLInjector.exe ^
-     build\obj\x64\inject.obj build\obj\x64\main.obj %LIBS%
+     build\obj\x64\syscalls.obj build\obj\x64\injector.obj build\obj\x64\unlink.obj ^
+     build\obj\x64\etw.obj build\obj\x64\cleanup.obj build\obj\x64\main.obj %LIBS%
 if errorlevel 1 exit /b 1
 mt.exe -nologo -manifest app.manifest -outputresource:"build\LLInjector.exe;#1"
 if errorlevel 1 exit /b 1
 
+cl %CFLAGS% /Fo:build\obj\x64\verify_payload.obj /c test\verify_payload.cpp
+if errorlevel 1 exit /b 1
+link /nologo /DLL /MACHINE:X64 /OUT:build\verify_payload_x64.dll ^
+     build\obj\x64\verify_payload.obj ntdll.lib
+if errorlevel 1 exit /b 1
+
+cl %CFLAGS% /Fo:build\obj\x64\payload.obj /c test\payload.cpp
+if errorlevel 1 exit /b 1
+link /nologo /DLL /MACHINE:X64 /OUT:build\test_payload_x64.dll ^
+     build\obj\x64\payload.obj
+if errorlevel 1 exit /b 1
+
 echo.
-echo [2/4] LLInjector_x86.exe  (x86, for 32-bit targets)
+echo [2/3] x86: LLInjector_x86, verification payload, normal payload
 call "%VSDIR%\VC\Auxiliary\Build\vcvars32.bat" >nul || exit /b 1
-cl %CFLAGS% /Fo:build\obj\x86\ /c src\inject.cpp src\main.cpp
+cl %CFLAGS% /Fo:build\obj\x86\ /c %SOURCES%
 if errorlevel 1 exit /b 1
 link %LDFLAGS% /MACHINE:X86 /OUT:build\LLInjector_x86.exe ^
-     build\obj\x86\inject.obj build\obj\x86\main.obj %LIBS%
+     build\obj\x86\syscalls.obj build\obj\x86\injector.obj build\obj\x86\unlink.obj ^
+     build\obj\x86\etw.obj build\obj\x86\cleanup.obj build\obj\x86\main.obj %LIBS%
 if errorlevel 1 exit /b 1
 mt.exe -nologo -manifest app.manifest -outputresource:"build\LLInjector_x86.exe;#1"
 if errorlevel 1 exit /b 1
 
-echo.
-echo [3/4] test payload (x64)
-call "%VSDIR%\VC\Auxiliary\Build\vcvars64.bat" >nul || exit /b 1
-cl %CFLAGS% /Fo:build\obj\x64\payload.obj /c test\payload.cpp
+cl %CFLAGS% /Fo:build\obj\x86\verify_payload.obj /c test\verify_payload.cpp
 if errorlevel 1 exit /b 1
-link /nologo /DLL /MACHINE:X64 /OUT:build\test_payload_x64.dll build\obj\x64\payload.obj
+link /nologo /DLL /MACHINE:X86 /OUT:build\verify_payload_x86.dll ^
+     build\obj\x86\verify_payload.obj ntdll.lib
 if errorlevel 1 exit /b 1
 
-echo.
-echo [4/4] test payload (x86)
-call "%VSDIR%\VC\Auxiliary\Build\vcvars32.bat" >nul || exit /b 1
 cl %CFLAGS% /Fo:build\obj\x86\payload.obj /c test\payload.cpp
 if errorlevel 1 exit /b 1
-link /nologo /DLL /MACHINE:X86 /OUT:build\test_payload_x86.dll build\obj\x86\payload.obj
+link /nologo /DLL /MACHINE:X86 /OUT:build\test_payload_x86.dll ^
+     build\obj\x86\payload.obj
 if errorlevel 1 exit /b 1
 
 echo.
-echo build complete:
+echo [3/3] build complete:
 dir /b build\*.exe build\*.dll
 endlocal
